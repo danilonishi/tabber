@@ -1,10 +1,13 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace Tabber
 {
-	public struct Hotkey
+
+	public partial struct Hotkey
 	{
 		//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -19,59 +22,53 @@ namespace Tabber
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-
-		// Modifiers
-		public const uint MOD_ALT = 0x0001;
-		public const uint MOD_CONTROL = 0x0002;
-		public const uint MOD_SHIFT = 0x004;
-		public const uint MOD_WIN = 0x0008;
-		// Options
-		public const uint MOD_NOREPEAT = 0x4000;
-		// Callback
-		public const uint WM_HOTKEY = 0x312;
-
-		private bool isRegistered;
-		public bool alt, shift, control, win;
-		public Keys keycode;
 		Message keypressMessage;
 
-		public uint ToInt()
-		{
-			uint value = (uint)keycode | GetModifiers();
-			return value;
-		}
+		Dictionary<HotkeyType, KeyInformation> _keyRegistration;
+		Dictionary<HotkeyType, bool> _statusRegistration;
 
-		public uint GetModifiers()
+		public Dictionary<HotkeyType, KeyInformation> keyRegistration
 		{
-			uint value = 0;
-			value |= alt ? MOD_ALT : 0;
-			value |= shift ? MOD_SHIFT : 0;
-			value |= control ? MOD_CONTROL : 0;
-			value |= win ? MOD_WIN : 0;
-			return value;
-		}
-
-		public void RegisterEscape(IntPtr hWnd)
-		{
-			RegisterHotKey(hWnd, 428465, 0, 27); // Register "Escape" as stop key
-			Console.WriteLine("\"Escape\" Registration: " + (isRegistered ? "Success" : "Failed"));
-		}
-
-		public bool RegisterHotkey(IntPtr hWnd)
-		{
-			if (isRegistered)
+			get
 			{
-				if (!this.UnregisterHotkey(hWnd))
+				if (_keyRegistration == null)
+				{
+					_keyRegistration = new Dictionary<HotkeyType, KeyInformation>();
+				}
+				return _keyRegistration;
+			}
+		}
+
+		public Dictionary<HotkeyType, bool> statusRegistration
+		{
+			get
+			{
+				if (_statusRegistration == null)
+				{
+					_statusRegistration = new Dictionary<HotkeyType, bool>();
+				}
+				return _statusRegistration;
+			}
+		}
+
+		public bool RegisterHotkey(IntPtr hWnd, KeyInformation keyInfo)
+		{
+			
+			if (statusRegistration.ContainsKey(keyInfo.type) && statusRegistration[keyInfo.type])
+			{
+				if (!this.UnregisterHotkey(hWnd, keyInfo.type))
 				{
 					Console.WriteLine("Halt");
 					return false;
 				}
 			}
 
-			isRegistered = RegisterHotKey(hWnd, 010844, GetModifiers(), (uint)keycode); // Register user hotkey
-			Console.WriteLine("Hotkey Registration: " + (isRegistered ? "Success" : "Failed"));
+			// Register user hotkey
+			statusRegistration[keyInfo.type] = RegisterHotKey(hWnd, (int)keyInfo.type, keyInfo.GetModifiers(), (uint)keyInfo.keycode);
+			keyRegistration[keyInfo.type] = keyInfo;
+			Console.WriteLine("Hotkey Registration: " + (statusRegistration.ContainsKey(keyInfo.type) ? "Success" : "Failed"));
 
-			if (!isRegistered)
+			if (!statusRegistration.ContainsKey(keyInfo.type))
 				return false;
 
 			if (keypressMessage == null)
@@ -80,15 +77,12 @@ namespace Tabber
 			return true;
 		}
 
-		public bool UnregisterHotkey(IntPtr hWnd)
+		public bool UnregisterHotkey(IntPtr hWnd, HotkeyType type)
 		{
-			bool successufllyUnregistered = UnregisterHotKey(hWnd, 010844);
-
-			if (successufllyUnregistered)
+			if (UnregisterHotKey(hWnd, (int)type))
 			{
-				isRegistered = false;
-				//alt = shift = control = false;
-				//keycode = Keys.None;
+				keyRegistration[type].Clear();
+				statusRegistration[type] = false;
 				Console.WriteLine("Hotkey successfully unregistered.");
 				return true;
 			}

@@ -1,5 +1,8 @@
 ﻿using System;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -29,27 +32,45 @@ namespace Tabber
 		DateTime LapTime;
 		int counter = -1;
 
-
 		Hotkey hotkeyConfig;
+		Screenshot screenshot;
+		Rectangle screenshotRect;
+		int screenshotBlinkSpeed;
+		int screenshotBlinkCount;
 
 		public Form1()
 		{
-			hotkeyConfig = new Hotkey();
-			hotkeyConfig.RegisterEscape(this.Handle);
-
+			InitializeComponent();
 			Application.ApplicationExit += HandleApplicationExit;
 
-			InitializeComponent();
+			var screens = Screen.AllScreens;
+			screenSelector.Items.AddRange(screens.Select(_ => _.DeviceName.Substring(4)).ToArray());
 
+			screenshot = new Screenshot();
+
+			screenSelector.SelectedIndex = Math.Min(Properties.Settings.Default.SelectedScreen, screens.Length - 1);
+			screenshotBlinkSpeed = Properties.Settings.Default.BlinkingSpeed;
+			screenshotBlinkCount = Properties.Settings.Default.BlinkCount;
 			intervalField.Value = Properties.Settings.Default.Interval;
 			countdownField.Value = Properties.Settings.Default.ExecutionCount;
 			startDelayField.Value = Properties.Settings.Default.StartDelay;
-			hotkeyConfig.keycode = (Keys)Properties.Settings.Default.Hotkey;
 
-			if (hotkeyConfig.keycode != 0)
-			{
-				RegisterHotkey();
-			}
+			hotkeyConfig = new Hotkey();
+
+			KeyInformation tabberKey = new KeyInformation() { type = HotkeyType.Tabber };
+			tabberKey.FromInt(Properties.Settings.Default.TabberKey, Keys.None);
+			hotkeyConfig.RegisterHotkey(this.Handle, tabberKey);
+			WriteHotkeyInfo(tabberHotkeyLabel, "Tabber", tabberKey);
+
+			KeyInformation stopKey = new KeyInformation() { type = HotkeyType.Stop };
+			stopKey.FromInt(Properties.Settings.Default.StopKey, Keys.Escape);
+			hotkeyConfig.RegisterHotkey(this.Handle, stopKey);
+
+			KeyInformation screenKeyInfo = new KeyInformation() { type = HotkeyType.Screenshot };
+			screenKeyInfo.FromInt(Properties.Settings.Default.ScreenKey, Keys.None);
+			hotkeyConfig.RegisterHotkey(this.Handle, screenKeyInfo);
+			WriteHotkeyInfo(screenshotLabel, "Screen", screenKeyInfo);
+
 		}
 
 		private void HandleApplicationExit(object sender, EventArgs e)
@@ -57,9 +78,23 @@ namespace Tabber
 			Properties.Settings.Default.Interval = intervalField.Value;
 			Properties.Settings.Default.ExecutionCount = countdownField.Value;
 			Properties.Settings.Default.StartDelay = startDelayField.Value;
-			Properties.Settings.Default.Hotkey = (int)hotkeyConfig.keycode;
+			Properties.Settings.Default.SelectedScreen = screenSelector.SelectedIndex;
+			Properties.Settings.Default.BlinkingSpeed = screenshotBlinkSpeed;
+			Properties.Settings.Default.BlinkCount = screenshotBlinkCount;
+
+			if (hotkeyConfig.keyRegistration.ContainsKey(HotkeyType.Tabber))
+				Properties.Settings.Default.TabberKey = hotkeyConfig.keyRegistration[HotkeyType.Tabber].ToInt();
+			if (hotkeyConfig.keyRegistration.ContainsKey(HotkeyType.Stop))
+				Properties.Settings.Default.StopKey = hotkeyConfig.keyRegistration[HotkeyType.Stop].ToInt();
+			if (hotkeyConfig.keyRegistration.ContainsKey(HotkeyType.Screenshot))
+				Properties.Settings.Default.ScreenKey = hotkeyConfig.keyRegistration[HotkeyType.Screenshot].ToInt();
+
 			Properties.Settings.Default.Save();
 		}
+
+		//
+		//
+		// Tabber
 
 		private void uiTimer_Tick(object sender, EventArgs e)
 		{
@@ -103,20 +138,14 @@ namespace Tabber
 
 		void ToggleAction()
 		{
-
 			if (!running)
 			{
-				// Enable!
-
 				if (running)
 					Stop();
-
 				Start();
 			}
 			else
 			{
-				// Disable!
-
 				Stop();
 			}
 		}
@@ -147,79 +176,90 @@ namespace Tabber
 			toolStripStatusLabel1.Text = "Ready";
 		}
 
-
+		//
+		//
+		// Hotkey Handling
 
 		bool readHotkey;
 
-		private void handleKeyUp(object sender, KeyEventArgs e)
+		KeyInformation currentKeyInfo;
+
+		bool RegisterHotkey()
 		{
-			if (readHotkey)
-			{
-				readHotkey = false;
-				RegisterHotkey();
-			}
+			if (currentKeyInfo == null)
+				throw new Exception("currentKeyInfo not initialized");
+
+			return hotkeyConfig.RegisterHotkey(this.Handle, currentKeyInfo);
 		}
 
-		void RegisterHotkey()
+		public void WriteHotkeyInfo(Label label, string target, KeyInformation info)
 		{
-			if (hotkeyConfig.RegisterHotkey(this.Handle))
-			{
-				hotkeyLabel.Text = string.Format("Current Hotkey: {0}{1}{2}{3}",
-					hotkeyConfig.alt ? "[Alt] " : string.Empty,
-					hotkeyConfig.control ? "[Ctrl] " : string.Empty,
-					hotkeyConfig.shift ? "[Shift] " : string.Empty,
-					hotkeyConfig.keycode
-					);
-			}
+			label.Text = string.Format("{4} Hotkey: {0}{1}{2}{3}",
+								info.alt ? "[Alt] " : string.Empty,
+								info.control ? "[Ctrl] " : string.Empty,
+								info.shift ? "[Shift] " : string.Empty,
+								info.keycode,
+								target
+								);
 		}
 
 		private void handleKeyDown(object sender, KeyEventArgs e)
 		{
 			if (readHotkey)
 			{
-				uint code = (uint)e.KeyCode;
+				if (currentKeyInfo == null)
+					throw new Exception("currentKeyInfo not initialized");
 
-				hotkeyConfig.control = e.Control;
-				hotkeyConfig.alt = e.Alt;
-				hotkeyConfig.shift = e.Shift;
-				hotkeyConfig.keycode = e.KeyCode;
+				currentKeyInfo.control = e.Control;
+				currentKeyInfo.alt = e.Alt;
+				currentKeyInfo.shift = e.Shift;
+				currentKeyInfo.keycode = e.KeyCode;
 			}
-
 		}
 
-		private void hotkeyButton_Click(object sender, EventArgs e)
+		private void handleKeyUp(object sender, KeyEventArgs e)
 		{
-			readHotkey = true;
-			hotkeyLabel.Text = "Press any key to register";
-		}
-
-		private void clearHotkeyButton_Click(object sender, EventArgs e)
-		{
-			UnregisterHotkey();
-		}
-
-		bool UnregisterHotkey()
-		{
-			var b = hotkeyConfig.UnregisterHotkey(this.Handle);
-			if (b)
+			if (readHotkey)
 			{
-				hotkeyLabel.Text = "Current Hotkey: None";
+				readHotkey = false;
+				if (RegisterHotkey())
+				{
+					switch (currentKeyInfo.type)
+					{
+						case HotkeyType.Tabber:
+							WriteHotkeyInfo(tabberHotkeyLabel, "Tabber", currentKeyInfo);
+							break;
+						case HotkeyType.Screenshot:
+							WriteHotkeyInfo(screenshotLabel, "Screen", currentKeyInfo);
+							break;
+						case HotkeyType.Stop:
+						default:
+							break;
+					}
+				}
 			}
-			return b;
+		}
+
+		bool UnregisterHotkey(HotkeyType type)
+		{
+			return hotkeyConfig.UnregisterHotkey(this.Handle, type);
 		}
 
 		protected override void WndProc(ref Message m)
 		{
 			switch (m.Msg)
 			{
-				case (int)Hotkey.WM_HOTKEY:
+				case (int)KeyInformation.WM_HOTKEY:
 					switch (m.WParam.ToInt32())
 					{
-						case 010844:
+						case (int)HotkeyType.Tabber:
 							ToggleAction();
 							break;
-						case 428465:
+						case (int)HotkeyType.Stop:
 							Stop();
+							break;
+						case (int)HotkeyType.Screenshot:
+							TakeScreenshot();
 							break;
 						default:
 							break;
@@ -228,6 +268,119 @@ namespace Tabber
 					break;
 			}
 			base.WndProc(ref m);
+		}
+
+		//
+		//
+		// Screen Capture
+
+		private void TakeScreenshot()
+		{
+			if (readHotkey)
+				return;
+
+			DirectBitmap dbmp1 = new DirectBitmap(screenshotRect.Width, screenshotRect.Height);
+			DirectBitmap dbmp2 = new DirectBitmap(screenshotRect.Width, screenshotRect.Height);
+			DirectBitmap dresult1 = new DirectBitmap(screenshotRect.Width, screenshotRect.Height);
+			DirectBitmap dresult2 = new DirectBitmap(screenshotRect.Width, screenshotRect.Height);
+
+			screenshot.GrabScreenPortion(screenshotRect, ref dbmp1.Bitmap);
+			//Thread.Sleep(60);
+			SendKeys.Send("%{TAB}");
+			Thread.Sleep(100);
+			screenshot.GrabScreenPortion(screenshotRect, ref dbmp2.Bitmap);
+			SendKeys.Send("%{TAB}");
+
+			BitmapComparer comp = new BitmapComparer();
+
+			if (!comp.GetDifferenceBitmapPair(dbmp1, dbmp2, Color.Red, ref dresult1, ref dresult2))
+				return;
+
+			dbmp1.Bitmap.Save("C:/temp/dbmp1.png", ImageFormat.Png);
+			dresult1.Bitmap.Save("C:/temp/dresult1.png", ImageFormat.Png);
+
+			PerPixelAlphaForm compareForm = new PerPixelAlphaForm();
+			compareForm.StartPosition = FormStartPosition.Manual;
+			compareForm.DesktopLocation = new Point(screenshotRect.X, screenshotRect.Y);
+			compareForm.SetDesktopLocation(screenshotRect.X, screenshotRect.Y);
+			compareForm.Size = new Size(screenshotRect.Width, screenshotRect.Height);
+			compareForm.Show();
+
+			for (int i = 0; i < screenshotBlinkCount; i++)
+			{
+				compareForm.SelectBitmap(dresult2.Bitmap);
+				Thread.Sleep(screenshotBlinkSpeed);
+				compareForm.SelectBitmap(dresult1.Bitmap);
+				Thread.Sleep(screenshotBlinkSpeed);
+			}
+			compareForm.Hide();
+			compareForm.Dispose();
+
+			//Thread.Sleep(100);
+			//this.BringToFront();
+			//this.Activate();
+
+			dbmp1.Dispose();
+			dbmp2.Dispose();
+			dresult1.Dispose();
+			dresult2.Dispose();
+
+		}
+
+		private void handleDisplayChange(object sender, EventArgs e)
+		{
+			SetCaptureBounds((sender as ComboBox).SelectedIndex);
+		}
+
+		private void SetCaptureBounds(int screenIndex)
+		{
+			screenshotRect = Screen.AllScreens[screenIndex].Bounds;
+		}
+
+		//
+		//
+		// UI Callback
+
+		private void blinkCount_ValueChanged(object sender, EventArgs e)
+		{
+			this.screenshotBlinkCount = (int)(sender as NumericUpDown).Value;
+		}
+
+		private void blinkingNumber_ValueChanged(object sender, EventArgs e)
+		{
+			this.screenshotBlinkSpeed = (int)(sender as NumericUpDown).Value;
+		}
+
+		private void setTabberHotkeyBtn_Click(object sender, EventArgs e)
+		{
+			currentKeyInfo = new KeyInformation();
+			currentKeyInfo.type = HotkeyType.Tabber;
+			tabberHotkeyLabel.Text = "Press any key to register";
+			readHotkey = true;
+		}
+
+		private void clearTabberHotkeyBtn_Click(object sender, EventArgs e)
+		{
+			if (UnregisterHotkey(HotkeyType.Tabber))
+			{
+				tabberHotkeyLabel.Text = "Tabber Hotkey: None";
+			}
+		}
+
+		private void setScreenshotHotkeyBtn_Click(object sender, EventArgs e)
+		{
+			currentKeyInfo = new KeyInformation();
+			currentKeyInfo.type = HotkeyType.Screenshot;
+			screenshotLabel.Text = "Press any key to register";
+			readHotkey = true;
+		}
+
+		private void clearScreenshotHotkeyBtn_Click(object sender, EventArgs e)
+		{
+			if (UnregisterHotkey(HotkeyType.Screenshot))
+			{
+				screenshotLabel.Text = "Current Hotkey: None";
+			}
 		}
 	}
 }
