@@ -296,9 +296,6 @@ namespace Tabber
 			if (!comp.GetDifferenceBitmapPair(dbmp1, dbmp2, Color.Red, ref dresult1, ref dresult2))
 				return;
 
-			dbmp1.Bitmap.Save("C:/temp/dbmp1.png", ImageFormat.Png);
-			dresult1.Bitmap.Save("C:/temp/dresult1.png", ImageFormat.Png);
-
 			PerPixelAlphaForm compareForm = new PerPixelAlphaForm();
 			compareForm.StartPosition = FormStartPosition.Manual;
 			compareForm.DesktopLocation = new Point(screenshotRect.X, screenshotRect.Y);
